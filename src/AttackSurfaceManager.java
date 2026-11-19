@@ -3,35 +3,28 @@ void main() {
     boolean isRunning = true;
     while (isRunning) {
         while (isRunning) {
-            IO.println("\n=== ATTACK SURFACE MANAGEMENT CLI ===");
-            IO.println("1. Add domain");
-            IO.println("2. See domain list");
-            IO.println("3. Get subdomain of domain in list");
-            IO.println("4. Export to txt");
-            IO.println("5. Exit");
-            IO.print("Select an option (1-5): ");
+            System.out.println("\n=== DEFENSIVE ATTACK SURFACE MANAGEMENT (ASM) CLI ===");
+            System.out.println("1. Add & Categorize Inventory (Domain / Subdomain / IP / ASN / Cloud)");
+            System.out.println("2. List Inventory");
+            System.out.println("3. Discover Inventory (Subdomain crt.sh & Port/Banner Scan)");
+            System.out.println("4. Audit Configuration & Discover Risks (DNS/Email, TLS, HTTP/CORS, Ports)");
+            System.out.println("5. Risk Dashboard");
+            System.out.println("6. Export Report to file TXT");
+            System.out.println("0. Exit");
+            System.out.print("Choose an option (0-6): ");
 
-            String choice = scanner.nextLine();
-
-            switch (choice) {
-                case "1":
-                    addDomain();
-                    break;
-                case "2":
-                    seeDomainList();
-                    break;
-                case "3":
-                    getSubdomains();
-                    break;
-                case "4":
-                    exportToTxt();
-                    break;
-                case "5":
-                    IO.println("Exiting application...");
+            switch (scanner.nextLine().trim()) {
+                case "1" -> addAsset();
+                case "2" -> listAssets();
+                case "3" -> runDiscovery();
+                case "4" -> runAudit();
+                case "5" -> showRiskDashboard();
+                case "6" -> exportReport();
+                case "0" -> {
+                    System.out.println("[+] Saved data to JSON file . Goodbye!");
                     isRunning = false;
-                    break;
-                default:
-                    IO.println("Invalid selection! Please enter a number from 1 to 5.");
+                }
+                default -> System.out.println("[-] Invalid Option");
             }
         }
 
@@ -39,19 +32,27 @@ void main() {
     scanner.close();
 }
 
-private static void addDomain() {
+private static void addAsset() {
     IO.print("Enter domain to add (e.g., example.com): ");
 }
 
-private static void seeDomainList() {
+private static void listAssets() {
     IO.print("List of entered domain:");
 }
 
-private static void getSubdomains() {
-    IO.print("List of subdomains:");
+private static void runDiscovery() {
+    IO.print("runDiscovery");
 }
 
-private static void exportToTxt() {
+private static void runAudit() {
+    IO.print("runAudit");
+}
+
+private static void showRiskDashboard() {
+    IO.print("showRiskDashboard");
+}
+
+private static void exportReport() {
     IO.print("Enter name of file to export:");
 }
 
