@@ -1,3 +1,4 @@
+import core.AssetFilters;
 import engine.RiskEngine;
 import model.*;
 import exception.*;
@@ -64,10 +65,10 @@ public class AttackSurfaceManager {
                 switch (choice) {
                     case "1" -> addAsset();
                     case "2" -> listAssets();
-                    case "3" -> runDiscovery();
-                    case "4" -> runAudit();
-                    case "5" -> showRiskDashboard();
-                    case "6" -> exportReport();
+                    case "3" -> filterAssets();
+                    case "4" -> runRiskAudit();
+                    case "5" -> deleteAsset();
+                    case "6" -> displaySnapshots();
                     default -> IO.println("[-] Invalid Option");
                 }
             if (!askToContinueOrExit()) {
@@ -122,7 +123,7 @@ public class AttackSurfaceManager {
             return;
         }
         System.out.printf("\n%-4s %-8s %-28s %-14s %-8s %-9s %-22s %-6s %-6s%n",
-                "NO.", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "OWNER", "PORTS", "RISKS");
+                "NO", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "OWNER", "PORTS", "RISKS");
 
         System.out.println("-".repeat(110));
 
@@ -157,19 +158,53 @@ public class AttackSurfaceManager {
         System.out.println("-".repeat(110));
     }
 
-    private static void runDiscovery() {
-        IO.print("runDiscovery");
+    private static void filterAssets() {
+        System.out.print("Choose Filter (1: Only PROD, 2: Only PUBLIC, 3: Risk Score > 5): ");
+        var fChoice = scanner.nextLine().trim();
+
+        final int minThreshold = 5;
+
+        List<Asset> filtered = switch (fChoice) {
+            case "1" -> inventory.stream().filter(AssetFilters.byEnvironment(Environment.PROD)).toList();
+            case "2" -> inventory.stream().filter(AssetFilters.isPublicExposed()).toList();
+            case "3" -> inventory.stream().filter(AssetFilters.riskScoreAbove(minThreshold)).toList();
+            default -> inventory;
+        };
+
+        if (filtered.isEmpty()) {
+            System.out.println("[-] Not Found suitable asset");
+            return;
+        }
+
+        System.out.printf("\n[+] FILTER RESULT (%d MATCHED ASSETS):%n", filtered.size());
+        System.out.printf("%-4s %-8s %-28s %-14s %-8s %-9s %-10s%n",
+                "NO", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "SCORE");
+        System.out.println("-".repeat(85));
+
+        for (int i = 0; i < filtered.size(); i++) {
+            Asset a = filtered.get(i);
+            System.out.printf("%-4d %-8s %-28s %-14s %-8s %-9s %-10d%n",
+                    (i + 1),
+                    a.getId(),
+                    a.getValue(),
+                    a.getAssetCategory(),
+                    a.getEnvironment(),
+                    a.getExposure(),
+                    a.calculateRiskScore()
+            );
+        }
+        System.out.println("-".repeat(85));
     }
 
-    private static void runAudit() {
+    private static void runRiskAudit() {
         IO.print("runAudit");
     }
 
-    private static void showRiskDashboard() {
+    private static void deleteAsset() {
         IO.print("showRiskDashboard");
     }
 
-    private static void exportReport() {
+    private static void displaySnapshots() {
         IO.print("Enter name of file to export:");
     }
 
