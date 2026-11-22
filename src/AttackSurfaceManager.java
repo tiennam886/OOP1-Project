@@ -3,20 +3,27 @@ import engine.RiskEngine;
 import model.*;
 import exception.*;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
+import java.util.StringJoiner;
 
 public class AttackSurfaceManager {
+    private static final String DATA_FILE = "assets.txt";
     private static final List<Asset> inventory = new ArrayList<>();
-    private final List<AssetSnapshot> snapshots = new ArrayList<>();
+    private static final List<AssetSnapshot> snapshots = new ArrayList<>();
     private static final Scanner scanner = new Scanner(System.in);
-    private final RiskEngine riskEngine = new RiskEngine();
+    private static final RiskEngine riskEngine = new RiskEngine();
     private static int idSequence = 100;
 
-    static void main(String[] args) {
+    static void main() {
         var app = new AttackSurfaceManager();
-        app.seedSampleData();
         app.run();
     }
 
@@ -38,6 +45,7 @@ public class AttackSurfaceManager {
     }
 
     public void run() {
+        loadFromFile();
         boolean isRunning = true;
         while (isRunning) {
                 String menuBuilder = """
@@ -58,7 +66,7 @@ public class AttackSurfaceManager {
                 var choice = scanner.nextLine().trim();
 
                 if ("0".equals(choice)) {
-                    System.out.println("[*] Saved data to JSON file . Goodbye!");
+                    System.out.println("[*] Saved data to TXT file . Goodbye!");
                     break;
                 }
 
@@ -72,7 +80,8 @@ public class AttackSurfaceManager {
                     default -> IO.println("[-] Invalid Option");
                 }
             if (!askToContinueOrExit()) {
-                System.out.println("[*] Closing Program. Good bye!!");
+                saveToFile();
+                System.out.println("[*] Save data and close application. Good bye!!");
                 isRunning = false;
             }
         }
@@ -197,15 +206,65 @@ public class AttackSurfaceManager {
     }
 
     private static void runRiskAudit() {
-        IO.print("runAudit");
+        listAssets();
+        System.out.print("Enter ID of the Asset that required further analysis:");
+        var targetId = scanner.nextLine().trim();
+
+        var asset = inventory.stream()
+                .filter(a -> a.getId().equalsIgnoreCase(targetId))
+                .findFirst()
+                .orElse(null);
+
+        if (asset == null) {
+            System.out.println("[-] Your Asset is not found.");
+            return;
+        }
+
+        asset.printAuditSummary();
+
+        riskEngine.inspectAssetWithPatternMatching(asset);
+
+        if (asset instanceof IpAsset ip) {
+            System.out.println("[*] Running Analysis:");
+            ip.getOpenPorts().forEach((port, banner) -> {
+                var portFindings = riskEngine.evaluatePort(port, banner);
+                portFindings.forEach(f -> System.out.println("   " + f));
+            });
+        }
     }
 
     private static void deleteAsset() {
-        IO.print("showRiskDashboard");
+        listAssets();
+        System.out.print("Input ID of the Asset you wanna delete: ");
+        var deleteId = scanner.nextLine().trim();
+
+        var target = inventory.stream()
+                .filter(a -> a.getId().equalsIgnoreCase(deleteId))
+                .findFirst()
+                .orElseThrow(() -> new AssetNotFoundException("[-] Not Found Asset with ID " + deleteId + " to delete!"));
+
+        var snap = new AssetSnapshot(
+                target.getId(), target.getValue(), target.getAssetCategory(),
+                target.getEnvironment(), target.getExposure(),
+                target.getFindings().size(), java.time.Instant.now()
+        );
+        snapshots.add(snap);
+
+        inventory.remove(target);
+        System.out.println("[+] Successfully Deleted asset with ID " + deleteId + " and save to snapshots");
     }
 
     private static void displaySnapshots() {
-        IO.print("Enter name of file to export:");
+        if (snapshots.isEmpty()) {
+            System.out.println("[-] No snapshot was recorded");
+            return;
+        }
+        var dtf = DateTimeFormatter.ISO_INSTANT;
+        System.out.println("\n--- LIST OF SNAPSHOT HISTORY ---");
+        for (AssetSnapshot s : snapshots) {
+            System.out.printf("Snapshot ID: %s | Value: %s | Category: %s | Risks: %d | Time: %s%n",
+                    s.id(), s.value(), s.type(), s.riskCount(), dtf.format(s.snapshotTime()));
+        }
     }
 
     private boolean askToContinueOrExit() {
@@ -214,6 +273,117 @@ public class AttackSurfaceManager {
         System.out.flush();
         String input = scanner.nextLine().trim().toLowerCase();
         return input.equals("y") || input.equals("yes");
+    }
+
+    private void loadFromFile() {
+        Path path = Path.of(DATA_FILE);
+        if (!Files.exists(path)) {
+            System.out.println("[*] Not Found " + DATA_FILE + ". Initializing Data Sample");
+            seedSampleData();
+            saveToFile();
+            return;
+        }
+
+        inventory.clear();
+        int maxId = 100;
+
+        try (BufferedReader reader = Files.newBufferedReader(path)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+
+                String[] parts = line.split("\\|");
+                if (parts.length < 7) continue;
+
+                String type = parts[0];
+                String id = parts[1];
+                String value = parts[2];
+                Environment env = Environment.valueOf(parts[3]);
+                Exposure exp = Exposure.valueOf(parts[4]);
+                OwnerContact owner = new OwnerContact(parts[5], parts[6]);
+
+                try {
+                    int num = Integer.parseInt(id.replaceAll("\\D+", ""));
+                    if (num > maxId) maxId = num;
+                } catch (NumberFormatException ignored) {}
+
+                switch (type) {
+                    case "DOMAIN" -> inventory.add(new DomainAsset(id, value, env, exp, owner));
+                    case "IP" -> {
+                        String ipRange = parts.length > 7 ? parts[7] : "/32";
+                        IpAsset ip = new IpAsset(id, value, env, exp, owner, ipRange);
+
+                        if (parts.length > 8 && !parts[8].isBlank()) {
+                            String[] portEntries = parts[8].split(",");
+                            for (String pe : portEntries) {
+                                String[] pTokens = pe.split(":");
+                                if (pTokens.length == 2) {
+                                    ip.addOpenPort(Integer.parseInt(pTokens[0].trim()), pTokens[1].trim());
+                                }
+                            }
+                        }
+                        inventory.add(ip);
+                    }
+                    case "CLOUD" -> {
+                        String provider = parts.length > 7 ? parts[7] : "AWS";
+                        String accountId = parts.length > 8 ? parts[8] : "ACC-DEFAULT";
+                        inventory.add(new CloudAsset(id, value, env, owner, provider, accountId));
+                    }
+                }
+            }
+            idSequence = maxId;
+            System.out.println("[+] Successfully Import " + inventory.size() + " Assets from file " + DATA_FILE);
+        } catch (IOException e) {
+            System.out.println("[-] Error while importing data: " + e.getMessage() + ". Use the data sample instead.");
+            seedSampleData();
+        }
+    }
+
+    private void saveToFile() {
+        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(Path.of(DATA_FILE)))) {
+            for (Asset a : inventory) {
+                var sb = new StringBuilder();
+
+                if (a instanceof DomainAsset d) {
+                    sb.append("DOMAIN|")
+                            .append(d.getId()).append("|")
+                            .append(d.getValue()).append("|")
+                            .append(d.getEnvironment()).append("|")
+                            .append(d.getExposure()).append("|")
+                            .append(d.getOwner().getTeamName()).append("|")
+                            .append(d.getOwner().getEmail());
+                } else if (a instanceof IpAsset ip) {
+                    sb.append("IP|")
+                            .append(ip.getId()).append("|")
+                            .append(ip.getValue()).append("|")
+                            .append(ip.getEnvironment()).append("|")
+                            .append(ip.getExposure()).append("|")
+                            .append(ip.getOwner().getTeamName()).append("|")
+                            .append(ip.getOwner().getEmail()).append("|")
+                            .append(ip.getIpRange()).append("|");
+
+                    // Serialize map openPorts: 3306:MySQL,22:SSH
+                    StringJoiner sj = new StringJoiner(",");
+                    ip.getOpenPorts().forEach((p, banner) -> sj.add(p + ":" + banner));
+                    sb.append(sj);
+                } else if (a instanceof CloudAsset c) {
+                    sb.append("CLOUD|")
+                            .append(c.getId()).append("|")
+                            .append(c.getValue()).append("|")
+                            .append(c.getEnvironment()).append("|")
+                            .append(c.getExposure()).append("|")
+                            .append(c.getOwner().getTeamName()).append("|")
+                            .append(c.getOwner().getEmail()).append("|")
+                            .append(c.getProvider()).append("|")
+                            .append(c.getAccountId());
+                }
+                writer.println(sb);
+            }
+            System.out.println("[+] Successfully Synchronized Data to file: " + DATA_FILE);
+        } catch (IOException e) {
+            System.out.println("[-] Error while exporting data to file: " + e.getMessage());
+        }
     }
 }
 
