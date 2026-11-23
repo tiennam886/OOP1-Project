@@ -3,8 +3,8 @@ package model;
 import java.time.LocalDate;
 
 public abstract class NetworkEntity {
-    private String entityName;
-    private LocalDate registeredDate;
+    private final String entityName;
+    private final LocalDate registeredDate;
 
     public NetworkEntity(String entityName, LocalDate registeredDate) {
         this.entityName = entityName;

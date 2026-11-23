@@ -2,17 +2,19 @@ import core.AssetFilters;
 import engine.RiskEngine;
 import model.*;
 import exception.*;
+import scanner.AuditScanner;
+import scanner.DiscoveryScanner;
 
 import java.io.BufferedReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
-import java.util.StringJoiner;
+import java.util.*;
 
 public class AttackSurfaceManager {
     private static final String DATA_FILE = "assets.txt";
@@ -20,6 +22,8 @@ public class AttackSurfaceManager {
     private static final List<AssetSnapshot> snapshots = new ArrayList<>();
     private static final Scanner scanner = new Scanner(System.in);
     private static final RiskEngine riskEngine = new RiskEngine();
+    private final DiscoveryScanner discoveryScanner = new DiscoveryScanner();
+    private static final AuditScanner auditScanner = new AuditScanner();
     private static int idSequence = 100;
 
     static void main() {
@@ -56,11 +60,14 @@ public class AttackSurfaceManager {
                         1. Add a New Asset (Domain, IP, Cloud Account)
                         2. Show List of Assets\s
                         3. Filter Assets by Risk
-                        4. Run Risk Evaluation
-                        5. Remove an Asset
-                        6. Show Snapshots History
+                        4. Run Discovery Asset
+                        5. Run Risk Evaluation
+                        6. Show Risk Dashboard
+                        7. Export Risk Report
+                        8. Remove an Asset
+                        9. Show Snapshots History
                         0. Exit
-                        Choose an option (0-6):\s""";
+                        Choose an option (0-9):\s""";
                 System.out.print(menuBuilder);
 
                 var choice = scanner.nextLine().trim();
@@ -74,9 +81,12 @@ public class AttackSurfaceManager {
                     case "1" -> addAsset();
                     case "2" -> listAssets();
                     case "3" -> filterAssets();
-                    case "4" -> runRiskAudit();
-                    case "5" -> deleteAsset();
-                    case "6" -> displaySnapshots();
+                    case "4" -> runDiscovery();
+                    case "5" -> runRiskAudit();
+                    case "6" -> showRiskDashboard();
+                    case "7" -> exportReport();
+                    case "8" -> deleteAsset();
+                    case "9" -> displaySnapshots();
                     default -> IO.println("[-] Invalid Option");
                 }
             if (!askToContinueOrExit()) {
@@ -205,31 +215,173 @@ public class AttackSurfaceManager {
         System.out.println("-".repeat(85));
     }
 
+    private void runDiscovery() {
+        listAssets();
+        System.out.print("Enter Target Asset ID for discovery (e.g., A-101): ");
+        var targetId = scanner.nextLine().trim();
+
+        var target = inventory.stream()
+                .filter(a -> a.getId().equalsIgnoreCase(targetId))
+                .findFirst()
+                .orElse(null);
+
+        if (target == null) {
+            System.out.println("[-] Asset not found with ID: " + targetId);
+            return;
+        }
+
+        System.out.println("\n[*] Initiating reconnaissance pipeline for: " + target.getValue());
+
+        // Step 1: Passive Subdomain Discovery via crt.sh
+        if (target instanceof DomainAsset domainAsset) {
+            System.out.println("[*] Querying crt.sh certificate logs for " + domainAsset.getValue() + "...");
+            Set<String> subs = discoveryScanner.discoverSubdomains(domainAsset.getValue());
+
+            if (subs.isEmpty()) {
+                System.out.println("[-] No subdomains discovered in public CT logs.");
+            } else {
+                System.out.printf("[+] Discovered %d subdomains for %s:%n", subs.size(), domainAsset.getValue());
+                int addedCount = 0;
+                for (String sub : subs) {
+                    domainAsset.addSubdomain(sub);
+                    boolean exists = inventory.stream().anyMatch(a -> a.getValue().equalsIgnoreCase(sub));
+                    if (!exists) {
+                        var newSubId = "A-" + (++idSequence);
+                        inventory.add(new DomainAsset(newSubId, sub, domainAsset.getEnvironment(),
+                                domainAsset.getExposure(), domainAsset.getOwner()));
+                        addedCount++;
+                    }
+                }
+                System.out.printf("[+] Successfully added %d new child subdomains into inventory.%n", addedCount);
+            }
+        }
+
+        System.out.println("[*] Launching multi-threaded port scan across 16 critical network ports...");
+        Map<Integer, String> openPorts = discoveryScanner.scanPorts(target.getValue(), DiscoveryScanner.DEFAULT_PORTS);
+
+        if (openPorts.isEmpty()) {
+            System.out.println("[-] No responsive open ports identified within scanned scope.");
+            return;
+        }
+
+        System.out.printf("[+] Identified %d open ports on %s:%n", openPorts.size(), target.getValue());
+        openPorts.forEach((p, banner) -> System.out.printf("  -> Port %-5d | Banner: %s%n", p, banner));
+
+        if (target instanceof IpAsset ip) {
+            openPorts.forEach(ip::addOpenPort);
+            System.out.println("[+] Updated open ports directly to selected IpAsset.");
+        } else if (target instanceof DomainAsset domain) {
+            try {
+                String resolvedIpStr = InetAddress.getByName(domain.getValue()).getHostAddress();
+                System.out.println("[*] DNS Resolution successful: " + domain.getValue() + " -> " + resolvedIpStr);
+
+                var existingIp = inventory.stream()
+                        .filter(a -> a instanceof IpAsset && a.getValue().equalsIgnoreCase(resolvedIpStr))
+                        .map(a -> (IpAsset) a)
+                        .findFirst()
+                        .orElse(null);
+
+                if (existingIp != null) {
+                    openPorts.forEach(existingIp::addOpenPort);
+                    System.out.printf("[+] Merged %d open ports into existing inventory host [%s].%n",
+                            openPorts.size(), existingIp.getId());
+                } else {
+                    var newIpId = "A-" + (++idSequence);
+                    var newIpAsset = new IpAsset(newIpId, resolvedIpStr, domain.getEnvironment(),
+                            domain.getExposure(), domain.getOwner(), "/32");
+                    openPorts.forEach(newIpAsset::addOpenPort);
+                    inventory.add(newIpAsset);
+                    System.out.printf("[+] AUTO-PROVISIONED NEW HOST: [ID: %s | IP: %s] with %d open ports!%n",
+                            newIpId, resolvedIpStr, openPorts.size());
+                }
+            } catch (UnknownHostException e) {
+                System.out.println("[-] Could not resolve domain to an IP address: " + domain.getValue());
+            }
+        }
+    }
+
+    private void showRiskDashboard() {
+        List<RiskFinding> allFindings = inventory.stream()
+                .flatMap(a -> a.getFindings().stream())
+                .toList();
+
+        System.out.println("\n=======================================================");
+        System.out.println("           DEFENSIVE ASM - RISK DASHBOARD");
+        System.out.println("=======================================================");
+        System.out.printf("Monitored Digital Assets : %d%n", inventory.size());
+        System.out.printf("Total Risk Findings      : %d%n", allFindings.size());
+        System.out.println("-".repeat(55));
+
+        for (Severity sev : Severity.values()) {
+            long count = allFindings.stream().filter(f -> f.severity() == sev).count();
+            System.out.printf("%-10s : %d findings%n", sev, count);
+        }
+        System.out.println("-".repeat(55));
+
+        System.out.println("\n[!] CRITICAL & HIGH SEVERITY PRIORITIES:");
+        allFindings.stream()
+                .filter(f -> f.severity() == Severity.CRITICAL || f.severity() == Severity.HIGH)
+                .limit(10)
+                .forEach(f -> System.out.printf(" - [%-8s] [%-12s] %s%n", f.severity(), f.category(), f.message()));
+    }
+
+    private void exportReport() {
+        String reportFile = "asm_report.txt";
+        try (PrintWriter writer = new PrintWriter(new FileWriter(reportFile))) {
+            writer.println("===============================================================================");
+            writer.println("           DEFENSIVE ATTACK SURFACE MANAGEMENT (ASM) - AUDIT REPORT");
+            writer.println("           Generated At: " + java.time.Instant.now());
+            writer.println("===============================================================================\n");
+
+            writer.println("1. ASSET INVENTORY SUMMARY:");
+            writer.printf("%-6s %-26s %-14s %-8s %-9s %-10s%n", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "RISK SCORE");
+            writer.println("-".repeat(78));
+            for (Asset a : inventory) {
+                writer.printf("%-6s %-26s %-14s %-8s %-9s %-10d%n",
+                        a.getId(), a.getValue(), a.getAssetCategory(), a.getEnvironment(), a.getExposure(), a.calculateRiskScore());
+            }
+
+            writer.println("\n2. COMPREHENSIVE SECURITY FINDINGS:");
+            writer.println("-".repeat(78));
+            for (Asset a : inventory) {
+                if (!a.getFindings().isEmpty()) {
+                    writer.printf("\n[*] Asset: %s (%s) - Owner: %s%n", a.getValue(), a.getId(), a.getOwner().getTeamName());
+                    for (RiskFinding f : a.getFindings()) {
+                        writer.printf("    - [%-8s] [%-12s] %s%n", f.severity(), f.category(), f.message());
+                    }
+                }
+            }
+            System.out.println("[+] Audit report exported successfully to: " + reportFile);
+        } catch (Exception e) {
+            System.out.println("[-] Export failed: " + e.getMessage());
+        }
+    }
+
     private static void runRiskAudit() {
         listAssets();
         System.out.print("Enter ID of the Asset that required further analysis:");
         var targetId = scanner.nextLine().trim();
 
-        var asset = inventory.stream()
+        var target = inventory.stream()
                 .filter(a -> a.getId().equalsIgnoreCase(targetId))
                 .findFirst()
                 .orElse(null);
 
-        if (asset == null) {
+        if (target == null) {
             System.out.println("[-] Your Asset is not found.");
             return;
         }
 
-        asset.printAuditSummary();
+        target.printAuditSummary();
 
-        riskEngine.inspectAssetWithPatternMatching(asset);
+        riskEngine.inspectAssetWithPatternMatching(target, auditScanner);
 
-        if (asset instanceof IpAsset ip) {
-            System.out.println("[*] Running Analysis:");
-            ip.getOpenPorts().forEach((port, banner) -> {
-                var portFindings = riskEngine.evaluatePort(port, banner);
-                portFindings.forEach(f -> System.out.println("   " + f));
-            });
+        System.out.println("\n--- IDENTIFIED RISK FINDINGS ---");
+        if (target.getFindings().isEmpty()) {
+            System.out.println("[+] No active vulnerabilities or posture deviations detected.");
+        } else {
+            target.getFindings().forEach(f ->
+                    System.out.printf("  [%-8s] (%-14s) %s%n", f.severity(), f.category(), f.message()));
         }
     }
 
