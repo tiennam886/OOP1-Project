@@ -52,43 +52,43 @@ public class AttackSurfaceManager {
         loadFromFile();
         boolean isRunning = true;
         while (isRunning) {
-                String menuBuilder = """
-                        
-                        =======================================================
-                            DEFENSIVE ATTACK SURFACE MANAGEMENT (ASM) CLI
-                        =======================================================
-                        1. Add a New Asset (Domain, IP, Cloud Account)
-                        2. Show List of Assets\s
-                        3. Filter Assets by Risk
-                        4. Run Discovery Asset
-                        5. Run Risk Evaluation
-                        6. Show Risk Dashboard
-                        7. Export Risk Report
-                        8. Remove an Asset
-                        9. Show Snapshots History
-                        0. Exit
-                        Choose an option (0-9):\s""";
-                System.out.print(menuBuilder);
+            String menuBuilder = """
+                    
+                    =======================================================
+                        DEFENSIVE ATTACK SURFACE MANAGEMENT (ASM) CLI
+                    =======================================================
+                    1. Add a New Asset (Domain, IP, Cloud Account)
+                    2. Show List of Assets\s
+                    3. Filter Assets by Risk
+                    4. Run Discovery Asset
+                    5. Run Risk Evaluation
+                    6. Show Risk Dashboard
+                    7. Export Risk Report
+                    8. Remove an Asset
+                    9. Show Snapshots History
+                    0. Exit
+                    Choose an option (0-9):\s""";
+            System.out.print(menuBuilder);
 
-                var choice = scanner.nextLine().trim();
+            var choice = scanner.nextLine().trim();
 
-                if ("0".equals(choice)) {
-                    System.out.println("[*] Saved data to TXT file . Goodbye!");
-                    break;
-                }
+            if ("0".equals(choice)) {
+                System.out.println("[*] Saved data to TXT file . Goodbye!");
+                break;
+            }
 
-                switch (choice) {
-                    case "1" -> addAsset();
-                    case "2" -> listAssets();
-                    case "3" -> filterAssets();
-                    case "4" -> runDiscovery();
-                    case "5" -> runRiskAudit();
-                    case "6" -> showRiskDashboard();
-                    case "7" -> exportReport();
-                    case "8" -> deleteAsset();
-                    case "9" -> displaySnapshots();
-                    default -> IO.println("[-] Invalid Option");
-                }
+            switch (choice) {
+                case "1" -> addAsset();
+                case "2" -> listAssets();
+                case "3" -> filterAssets();
+                case "4" -> runDiscovery();
+                case "5" -> runRiskAudit();
+                case "6" -> showRiskDashboard();
+                case "7" -> exportReport();
+                case "8" -> deleteAsset();
+                case "9" -> displaySnapshots();
+                default -> IO.println("[-] Invalid Option");
+            }
             if (!askToContinueOrExit()) {
                 saveToFile();
                 System.out.println("[*] Save data and close application. Good bye!!");
@@ -106,7 +106,14 @@ public class AttackSurfaceManager {
             System.out.print("Input Asset's Value (EX: example.com, 1.1.1.1, AWS-Prod): ");
             var val = scanner.nextLine().trim();
             if (val.isEmpty()) throw new InvalidAssetException("Asset's value can not be empty!");
-
+            var duplicateOpt = findExistingAsset(val);
+            if (duplicateOpt.isPresent()) {
+                Asset existing = duplicateOpt.get();
+                throw new InvalidAssetException(String.format(
+                        "[-] Duplicate asset rejected! '%s' is already registered as [%s] with Category: %s.",
+                        val, existing.getId(), existing.getAssetCategory()
+                ));
+            }
             System.out.print("Environment (1: PROD, 2: STAGING, 3: DEV): ");
             var env = switch (scanner.nextLine().trim()) {
                 case "1" -> Environment.PROD;
@@ -244,8 +251,7 @@ public class AttackSurfaceManager {
                 int addedCount = 0;
                 for (String sub : subs) {
                     domainAsset.addSubdomain(sub);
-                    boolean exists = inventory.stream().anyMatch(a -> a.getValue().equalsIgnoreCase(sub));
-                    if (!exists) {
+                    if (findExistingAsset(sub).isEmpty()) {
                         var newSubId = "A-" + (++idSequence);
                         inventory.add(new DomainAsset(newSubId, sub, domainAsset.getEnvironment(),
                                 domainAsset.getExposure(), domainAsset.getOwner()));
@@ -275,15 +281,10 @@ public class AttackSurfaceManager {
                 String resolvedIpStr = InetAddress.getByName(domain.getValue()).getHostAddress();
                 System.out.println("[*] DNS Resolution successful: " + domain.getValue() + " -> " + resolvedIpStr);
 
-                var existingIp = inventory.stream()
-                        .filter(a -> a instanceof IpAsset && a.getValue().equalsIgnoreCase(resolvedIpStr))
-                        .map(a -> (IpAsset) a)
-                        .findFirst()
-                        .orElse(null);
-
-                if (existingIp != null) {
+                var existingIpOpt = findExistingAsset(resolvedIpStr);
+                if (existingIpOpt.isPresent() && existingIpOpt.get() instanceof IpAsset existingIp) {
                     openPorts.forEach(existingIp::addOpenPort);
-                    System.out.printf("[+] Merged %d open ports into existing inventory host [%s].%n",
+                    System.out.printf("[+] Merged %d open ports into existing host [%s].%n",
                             openPorts.size(), existingIp.getId());
                 } else {
                     var newIpId = "A-" + (++idSequence);
@@ -291,8 +292,6 @@ public class AttackSurfaceManager {
                             domain.getExposure(), domain.getOwner(), "/32");
                     openPorts.forEach(newIpAsset::addOpenPort);
                     inventory.add(newIpAsset);
-                    System.out.printf("[+] AUTO-PROVISIONED NEW HOST: [ID: %s | IP: %s] with %d open ports!%n",
-                            newIpId, resolvedIpStr, openPorts.size());
                 }
             } catch (UnknownHostException e) {
                 System.out.println("[-] Could not resolve domain to an IP address: " + domain.getValue());
@@ -424,7 +423,7 @@ public class AttackSurfaceManager {
         System.out.print("Continue? (y/n): ");
         System.out.flush();
         String input = scanner.nextLine().trim().toLowerCase();
-        return input.equals("y") || input.equals("yes");
+        return input.equals("n") || input.equals("no");
     }
 
     private void loadFromFile() {
@@ -458,7 +457,8 @@ public class AttackSurfaceManager {
                 try {
                     int num = Integer.parseInt(id.replaceAll("\\D+", ""));
                     if (num > maxId) maxId = num;
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) {
+                }
 
                 switch (type) {
                     case "DOMAIN" -> inventory.add(new DomainAsset(id, value, env, exp, owner));
@@ -536,6 +536,16 @@ public class AttackSurfaceManager {
         } catch (IOException e) {
             System.out.println("[-] Error while exporting data to file: " + e.getMessage());
         }
+    }
+
+    private static Optional<Asset> findExistingAsset(String value) {
+        if (value == null || value.isBlank()) {
+            return Optional.empty();
+        }
+        String normalizedValue = value.trim();
+        return inventory.stream()
+                .filter(asset -> asset.getValue().equalsIgnoreCase(normalizedValue))
+                .findFirst();
     }
 }
 

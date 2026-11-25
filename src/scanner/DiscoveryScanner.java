@@ -20,69 +20,80 @@ public class DiscoveryScanner {
             .build();
 
     public static final List<Integer> DEFAULT_PORTS = List.of(
-            21, 22, 23, 25, 53, 80, 443, 445, 3306, 3389, 5432, 6379, 8080, 8443, 9200, 27017
+            21, 22, 23, 25, 53, 80, 443, 445, 3306, 3389, 5432, 6379, 8080, 8000, 8081, 8443, 9200, 27017
     );
-
     public Set<String> discoverSubdomains(String domain) {
         Set<String> results = new TreeSet<>();
         String normalizedDomain = domain.trim().toLowerCase();
-        String url = "https://crt.sh/?q=%25." + normalizedDomain + "&output=json";
-
+        String crtUrl = "https://crt.sh/?q=%25." + normalizedDomain + "&output=json";
+        boolean crtSuccess = fetchSubdomains(crtUrl, normalizedDomain, results, "crt.sh");
+        if (!crtSuccess || results.isEmpty()) {
+            System.out.println("[*] Primary service crt.sh failed/unavailable. Triggering automatic failover to ctlogs.dev...");
+            String ctlogsUrl = "[suspicious link removed]." + normalizedDomain + "&output=json";
+            fetchSubdomains(ctlogsUrl, normalizedDomain, results, "ctlogs.dev");
+        }
+        return results;
+    }
+    private boolean fetchSubdomains(String targetUrl, String domain, Set<String> results, String providerName) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(URI.create(targetUrl))
                     .header("User-Agent", "Defensive-ASM-Scanner/1.0")
-                    .timeout(Duration.ofSeconds(15))
+                    .timeout(Duration.ofSeconds(12))
                     .GET()
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.print(response.body());
             if (response.statusCode() == 200) {
-                Pattern pattern = Pattern.compile("\"name_value\"\\s*:\\s*\"([^\"]+)\"");
-                Matcher matcher = pattern.matcher(response.body());
-                while (matcher.find()) {
-                    for (String line : matcher.group(1).split("\\\\n|\n")) {
-                        String cleaned = line.trim().toLowerCase().replace("*.", "");
-                        if (cleaned.endsWith("." + normalizedDomain) && !cleaned.contains(" ")) {
-                            results.add(cleaned);
-                        }
-                    }
-                }
+                parseSubdomainsFromResponse(response.body(), domain, results);
+                System.out.printf("[+] Successfully queried %s (%d unique subdomains found)%n", providerName, results.size());
+                return true;
+            } else {
+                System.out.printf("[-] %s returned HTTP error status: %d (Failover candidate)%n", providerName, response.statusCode());
+                return false;
             }
         } catch (Exception e) {
-            System.out.println("[-] Can not connect to crt.sh (" + e.getMessage() + ")");
+            System.out.printf("[-] Failed to query %s: %s%n", providerName, e.getMessage());
+            return false;
         }
-        return results;
+    }
+
+    private void parseSubdomainsFromResponse(String responseBody, String domain, Set<String> results) {
+        if (responseBody == null || responseBody.isBlank()) return;
+
+        Pattern pattern = Pattern.compile("\"([^\"]+)\"");
+        Matcher matcher = pattern.matcher(responseBody);
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            for (String line : token.split("\\\\n|\n")) {
+                String cleaned = line.trim().toLowerCase().replace("*.", "");
+                if (cleaned.endsWith("." + domain) && !cleaned.equals("." + domain) && !cleaned.contains(" ")) {
+                    results.add(cleaned);
+                }
+            }
+        }
     }
 
     public Map<Integer, String> scanPorts(String host, List<Integer> ports) {
         Map<Integer, String> openPorts = new ConcurrentSkipListMap<>();
-        try (ExecutorService executor = Executors.newFixedThreadPool(20)) {
-            List<Future<?>> futures = new ArrayList<>();
+        ExecutorService executor = Executors.newFixedThreadPool(20);
+        List<Future<?>> futures = new ArrayList<>();
+        for (int port : ports) {
+            futures.add(executor.submit(() -> {
+                try (Socket socket = new Socket()) {
+                    socket.connect(new InetSocketAddress(host, port), 600);
+                    socket.setSoTimeout(1000);
 
-            for (int port : ports) {
-                futures.add(executor.submit(() -> {
-                    try (Socket socket = new Socket()) {
-
-                        socket.connect(new InetSocketAddress(host, port), 600);
-                        socket.setSoTimeout(1000);
-
-                        String banner = grabBanner(socket, port);
-                        openPorts.put(port, banner);
-                    } catch (Exception ignored) {
-                    }
-                }));
-            }
-
-            for (Future<?> f : futures) {
-                try {
-                    f.get(2, TimeUnit.SECONDS);
+                    String banner = grabBanner(socket, port);
+                    openPorts.put(port, banner);
                 } catch (Exception ignored) {
                 }
-            }
-            executor.shutdown();
+            }));
         }
+        for (Future<?> f : futures) {
+            try { f.get(2, TimeUnit.SECONDS); } catch (Exception ignored) {}
+        }
+        executor.shutdown();
         return new TreeMap<>(openPorts);
     }
 
