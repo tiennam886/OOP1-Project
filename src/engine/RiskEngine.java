@@ -77,14 +77,7 @@ public class RiskEngine {
                         evaluatePort(port, banner).forEach(ip::addFinding)
                 );
             }
-            case CloudAsset c -> {
-                System.out.println("  -> [CLOUD IAM] Auditing cloud boundary policies for " + c.getProvider());
-                if (c.getExposure() == Exposure.PUBLIC) {
-                    c.addFinding(Severity.CRITICAL, "CLOUD_IAM", "Cloud resource account perimeter exposed publicly");
-                } else {
-                    c.addFinding(Severity.INFO, "CLOUD_IAM", "Cloud account boundary properly restricted to VPC/Internal");
-                }
-            }
+
             default -> System.out.println("  -> Unrecognized asset category.");
         }
 

@@ -1,12 +1,11 @@
 package model;
 
 import core.Auditable;
-import exception.InvalidAssetException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 
-public abstract sealed class Asset extends NetworkEntity implements Auditable permits DomainAsset, IpAsset, CloudAsset {
+public abstract sealed class Asset extends NetworkEntity implements Auditable permits DomainAsset, IpAsset {
     private final String id;
     private final String value;
     private Environment environment;

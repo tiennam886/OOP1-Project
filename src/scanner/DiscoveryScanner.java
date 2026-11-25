@@ -26,27 +26,32 @@ public class DiscoveryScanner {
         Set<String> results = new TreeSet<>();
         String normalizedDomain = domain.trim().toLowerCase();
         String crtUrl = "https://crt.sh/?q=%25." + normalizedDomain + "&output=json";
-        boolean crtSuccess = fetchSubdomains(crtUrl, normalizedDomain, results, "crt.sh");
+        boolean crtSuccess = fetchSubdomains("crt.sh", crtUrl, "name_value", normalizedDomain, results);
+
         if (!crtSuccess || results.isEmpty()) {
             System.out.println("[*] Primary service crt.sh failed/unavailable. Triggering automatic failover to ctlogs.dev...");
-            String ctlogsUrl = "[suspicious link removed]." + normalizedDomain + "&output=json";
-            fetchSubdomains(ctlogsUrl, normalizedDomain, results, "ctlogs.dev");
+            String ctlogsUrl = "https://api.ctlogs.dev/v1/hosts/" + normalizedDomain;
+            fetchSubdomains("ctlogs.dev API", ctlogsUrl, "host", normalizedDomain, results);
         }
+
         return results;
     }
-    private boolean fetchSubdomains(String targetUrl, String domain, Set<String> results, String providerName) {
+
+    private boolean fetchSubdomains(String providerName, String apiUrl, String jsonKey, String domain, Set<String> results) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(targetUrl))
+                    .uri(URI.create(apiUrl))
                     .header("User-Agent", "Defensive-ASM-Scanner/1.0")
                     .timeout(Duration.ofSeconds(12))
                     .GET()
                     .build();
-
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
             if (response.statusCode() == 200) {
-                parseSubdomainsFromResponse(response.body(), domain, results);
-                System.out.printf("[+] Successfully queried %s (%d unique subdomains found)%n", providerName, results.size());
+                int countBefore = results.size();
+                parseSubdomainsFromResponse(response.body(), jsonKey, domain, results);
+                int newlyAdded = results.size() - countBefore;
+                System.out.printf("[+] Successfully queried %s (%d unique subdomains added)%n", providerName, newlyAdded);
                 return true;
             } else {
                 System.out.printf("[-] %s returned HTTP error status: %d (Failover candidate)%n", providerName, response.statusCode());
@@ -58,14 +63,15 @@ public class DiscoveryScanner {
         }
     }
 
-    private void parseSubdomainsFromResponse(String responseBody, String domain, Set<String> results) {
+    private void parseSubdomainsFromResponse(String responseBody, String jsonKey, String domain, Set<String> results) {
         if (responseBody == null || responseBody.isBlank()) return;
 
-        Pattern pattern = Pattern.compile("\"([^\"]+)\"");
+        Pattern pattern = Pattern.compile("\"" + Pattern.quote(jsonKey) + "\"\\s*:\\s*\"([^\"]+)\"");
         Matcher matcher = pattern.matcher(responseBody);
+
         while (matcher.find()) {
-            String token = matcher.group(1);
-            for (String line : token.split("\\\\n|\n")) {
+            String rawValue = matcher.group(1);
+            for (String line : rawValue.split("\\\\n|\n")) {
                 String cleaned = line.trim().toLowerCase().replace("*.", "");
                 if (cleaned.endsWith("." + domain) && !cleaned.equals("." + domain) && !cleaned.contains(" ")) {
                     results.add(cleaned);
