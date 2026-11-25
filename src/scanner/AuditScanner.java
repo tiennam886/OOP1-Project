@@ -59,7 +59,7 @@ public class AuditScanner {
                 }
             }
         } catch (Exception e) {
-            findings.add(new RiskFinding(Severity.INFO, "TLS", "Cannot check TLS via port " + port + ": " + e.getMessage()));
+            System.out.println("TLS Cannot check TLS via port " + port + ": " + e.getMessage());
         }
         return findings;
     }
@@ -99,7 +99,7 @@ public class AuditScanner {
             });
 
         } catch (Exception e) {
-            findings.add(new RiskFinding(Severity.INFO, "HTTP", "Cannot check HTTP headers: " + e.getMessage()));
+            System.out.println("HTTP: Cannot check HTTP headers: " + e.getMessage());
         }
         return findings;
     }
@@ -177,24 +177,20 @@ public class AuditScanner {
                         findings.add(new RiskFinding(
                                 Severity.CRITICAL,
                                 "CVE-2026-123007",
-                                String.format("CRITICAL VULNERABILITY DETECTED: NGINX %s has HTTP/2 enabled (CVE-2026-123007 Integer Underflow RCE). Immediate upgrade required!",
+                                String.format("DETECTED: NGINX %s has HTTP/2 enabled",
                                         nginxVersionStr.isEmpty() ? "Unknown Version" : nginxVersionStr)
                         ));
                     } else {
                         findings.add(new RiskFinding(
                                 Severity.INFO,
                                 "HTTP2_STATUS",
-                                "NGINX detected with HTTP/2 enabled (Version " + (nginxVersionStr.isEmpty() ? "Unknown" : nginxVersionStr) + " appears patched)."
+                                "NGINX " + (nginxVersionStr.isEmpty() ? "Unknown" : nginxVersionStr) + " HTTP/2 enabled."
                         ));
                     }
                 }
             }
         } catch (Exception e) {
-            findings.add(new RiskFinding(
-                    Severity.INFO,
-                    "CVE_CHECK",
-                    "Could not complete NGINX HTTP/2 vulnerability check: " + e.getMessage()
-            ));
+            System.out.println("CVE_CHECK: Could not complete NGINX HTTP/2 vulnerability check: " + e.getMessage());
         }
 
         return findings;
