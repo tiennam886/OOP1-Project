@@ -4,6 +4,8 @@ import model.*;
 import scanner.AuditScanner;
 
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 public class RiskEngine {
     public List<RiskFinding> evaluatePort(int port, String serviceName) {
@@ -24,22 +26,48 @@ public class RiskEngine {
         return List.of(new RiskFinding(sev, "NETWORK_PORT", riskVerdict));
     }
 
-    public void inspectAssetWithPatternMatching(Asset asset, AuditScanner auditScanner) {
+    public void inspectAssetWithPatternMatching(Asset asset, AuditScanner auditScanner, List<Asset> inventory) {
         if (asset == null || auditScanner == null) return;
 
         System.out.println("\n[*] Executing contextual audit dispatch via Switch Pattern Matching:");
 
         switch (asset) {
             case DomainAsset d when d.getAssetCategory().equals("APEX_DOMAIN") -> {
-                System.out.println("  -> [APEX DOMAIN] Triggering Root DNS, Email Governance (SPF/DMARC), TLS & HTTP audits...");
+                System.out.println("  -> [APEX DOMAIN] Triggering Root DNS, Email Governance, TLS, HTTP & CVE-2026-123007 audits...");
                 auditScanner.checkEmailGovernance(d.getValue()).forEach(d::addFinding);
                 auditScanner.checkTls(d.getValue(), 443).forEach(d::addFinding);
                 auditScanner.checkHttpAndCors(d.getValue()).forEach(d::addFinding);
+                auditScanner.checkNginxHttp2Vulnerability(d.getValue()).forEach(d::addFinding);
+
+                Set<String> targetSubdomains = new TreeSet<>(d.getSubdomains());
+
+                if (inventory != null) {
+                    inventory.stream()
+                            .filter(a -> a instanceof DomainAsset)
+                            .map(Asset::getValue)
+                            .filter(val -> val.endsWith("." + d.getValue()) && !val.equalsIgnoreCase(d.getValue()))
+                            .forEach(targetSubdomains::add);
+                }
+
+                if (!targetSubdomains.isEmpty()) {
+                    System.out.printf("%n  [+] Auto-auditing %d related subdomains for %s:%n",
+                            targetSubdomains.size(), d.getValue());
+                    for (String sub : targetSubdomains) {
+                        System.out.println("     * Auditing subdomain target: " + sub);
+                        auditScanner.checkTls(sub, 443).forEach(d::addFinding);
+                        auditScanner.checkHttpAndCors(sub).forEach(d::addFinding);
+                        auditScanner.checkNginxHttp2Vulnerability(sub).forEach(d::addFinding);
+                    }
+                } else {
+                    System.out.println("  [*] No child subdomains registered yet. (Tip: Run Option 3 'Discovery' first).");
+                }
             }
             case DomainAsset d -> {
                 System.out.println("  -> [SUBDOMAIN] Inspecting CNAME Takeover vectors, TLS validity & HTTP Headers...");
                 auditScanner.checkTls(d.getValue(), 443).forEach(d::addFinding);
                 auditScanner.checkHttpAndCors(d.getValue()).forEach(d::addFinding);
+
+                auditScanner.checkNginxHttp2Vulnerability(d.getValue()).forEach(d::addFinding);
             }
             case IpAsset ip when ip.getOpenPorts().size() > 5 -> {
                 System.out.println("  -> [HIGH ALERT IP] Excessively exposed host (" + ip.getOpenPorts().size() + " ports open)...");

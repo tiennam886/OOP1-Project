@@ -373,7 +373,7 @@ public class AttackSurfaceManager {
 
         target.printAuditSummary();
 
-        riskEngine.inspectAssetWithPatternMatching(target, auditScanner);
+        riskEngine.inspectAssetWithPatternMatching(target, auditScanner, inventory);
 
         System.out.println("\n--- IDENTIFIED RISK FINDINGS ---");
         if (target.getFindings().isEmpty()) {
@@ -423,7 +423,7 @@ public class AttackSurfaceManager {
         System.out.print("Continue? (y/n): ");
         System.out.flush();
         String input = scanner.nextLine().trim().toLowerCase();
-        return input.equals("n") || input.equals("no");
+        return !(input.equals("n") || input.equals("no"));
     }
 
     private void loadFromFile() {

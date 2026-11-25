@@ -15,8 +15,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class AuditScanner {
@@ -51,6 +53,8 @@ public class AuditScanner {
                         findings.add(new RiskFinding(Severity.HIGH, "TLS", "TLS Certificate will be expired within " + daysLeft + " days"));
                     } else if (daysLeft < 30) {
                         findings.add(new RiskFinding(Severity.MEDIUM, "TLS", "TLS Certificate will be expired within " + daysLeft + " days"));
+                    } else{
+                        findings.add(new RiskFinding(Severity.INFO, "TLS", "TLS Certificate will be expired within " + daysLeft + " days"));
                     }
                 }
             }
@@ -139,5 +143,96 @@ public class AuditScanner {
             }
         } catch (Exception ignored) {}
         return records;
+    }
+
+    public List<RiskFinding> checkNginxHttp2Vulnerability(String host) {
+        List<RiskFinding> findings = new ArrayList<>();
+        if (host == null || host.isBlank()) return findings;
+
+        String targetUrl = (host.startsWith("http://") || host.startsWith("https://")) ? host : "https://" + host;
+
+        try {
+            HttpClient http2Client = HttpClient.newBuilder()
+                    .version(HttpClient.Version.HTTP_2)
+                    .connectTimeout(Duration.ofSeconds(6))
+                    .build();
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(targetUrl))
+                    .header("User-Agent", "Defensive-ASM-Scanner/1.0")
+                    .timeout(Duration.ofSeconds(6))
+                    .GET()
+                    .build();
+
+            HttpResponse<Void> response = http2Client.send(request, HttpResponse.BodyHandlers.discarding());
+
+            boolean isHttp2Enabled = (response.version() == HttpClient.Version.HTTP_2);
+            String serverHeader = response.headers().firstValue("Server").orElse("").toLowerCase();
+
+            if (serverHeader.contains("nginx")) {
+                String nginxVersionStr = extractNginxVersion(serverHeader);
+
+                if (isHttp2Enabled) {
+                    if (isVulnerableNginxVersion(nginxVersionStr)) {
+                        findings.add(new RiskFinding(
+                                Severity.CRITICAL,
+                                "CVE-2026-123007",
+                                String.format("CRITICAL VULNERABILITY DETECTED: NGINX %s has HTTP/2 enabled (CVE-2026-123007 Integer Underflow RCE). Immediate upgrade required!",
+                                        nginxVersionStr.isEmpty() ? "Unknown Version" : nginxVersionStr)
+                        ));
+                    } else {
+                        findings.add(new RiskFinding(
+                                Severity.INFO,
+                                "HTTP2_STATUS",
+                                "NGINX detected with HTTP/2 enabled (Version " + (nginxVersionStr.isEmpty() ? "Unknown" : nginxVersionStr) + " appears patched)."
+                        ));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            findings.add(new RiskFinding(
+                    Severity.INFO,
+                    "CVE_CHECK",
+                    "Could not complete NGINX HTTP/2 vulnerability check: " + e.getMessage()
+            ));
+        }
+
+        return findings;
+    }
+
+    private String extractNginxVersion(String serverHeader) {
+        Pattern pattern = Pattern.compile("nginx/(\\d+\\.\\d+\\.\\d+)");
+        Matcher matcher = pattern.matcher(serverHeader);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "";
+    }
+
+    private boolean isVulnerableNginxVersion(String version) {
+        if (version.isEmpty()) {
+            return true;
+        }
+
+        try {
+            String[] parts = version.split("\\.");
+            int major = Integer.parseInt(Arrays.toString(parts));
+            int minor = Integer.parseInt(parts[4]);
+            int patch = Integer.parseInt(parts[5]);
+
+            // Vulnerable Ranges (CVE-2026-123007):
+            // 1. Open Source 1.9.5 <= version <= 1.30.6 (Fixed in 1.30.7)
+            // 2. Open Source 1.31.0 <= version <= 1.31.8 (Fixed in 1.31.9)
+            if (major == 1) {
+                if (minor >= 9 && minor <= 30) {
+                    return minor < 30 || patch <= 6;
+                } else if (minor == 31) {
+                    return patch <= 8;
+                }
+            }
+        } catch (Exception ignored) {
+            return true;
+        }
+        return false;
     }
 }
