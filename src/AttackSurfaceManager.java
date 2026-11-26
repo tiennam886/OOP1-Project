@@ -100,10 +100,10 @@ public class AttackSurfaceManager {
 
     private static void addAsset() {
         try {
-            System.out.print("Choose an Asset Type (1: DOMAIN, 2: IP, 3: CLOUD): ");
+            System.out.print("Choose an Asset Type (1: DOMAIN, 2: IP): ");
             var typeChoice = scanner.nextLine().trim();
 
-            System.out.print("Input Asset's Value (EX: example.com, 1.1.1.1, AWS-Prod): ");
+            System.out.print("Input Asset's Value (EX: example.com, 1.1.1.1): ");
             var val = scanner.nextLine().trim();
             if (val.isEmpty()) throw new InvalidAssetException("Asset's value can not be empty!");
             var duplicateOpt = findExistingAsset(val);
@@ -132,7 +132,6 @@ public class AttackSurfaceManager {
             Asset newAsset = switch (typeChoice) {
                 case "1" -> new DomainAsset(newId, val, env, exp, owner);
                 case "2" -> new IpAsset(newId, val, env, exp, owner, "/32");
-                case "3" -> new CloudAsset(newId, val, env, owner, "AWS", "ACC-9988");
                 default -> throw new InvalidAssetException("Invalid Asset's Type: " + typeChoice);
             };
 
@@ -239,7 +238,6 @@ public class AttackSurfaceManager {
 
         System.out.println("\n[*] Initiating reconnaissance pipeline for: " + target.getValue());
 
-        // Step 1: Passive Subdomain Discovery via crt.sh
         if (target instanceof DomainAsset domainAsset) {
             System.out.println("[*] Querying crt.sh certificate logs for " + domainAsset.getValue() + "...");
             Set<String> subs = discoveryScanner.discoverSubdomains(domainAsset.getValue());
@@ -284,6 +282,7 @@ public class AttackSurfaceManager {
                 var existingIpOpt = findExistingAsset(resolvedIpStr);
                 if (existingIpOpt.isPresent() && existingIpOpt.get() instanceof IpAsset existingIp) {
                     openPorts.forEach(existingIp::addOpenPort);
+                    domain.setAssociatedIp(resolvedIpStr);
                     System.out.printf("[+] Merged %d open ports into existing host [%s].%n",
                             openPorts.size(), existingIp.getId());
                 } else {
@@ -291,6 +290,7 @@ public class AttackSurfaceManager {
                     var newIpAsset = new IpAsset(newIpId, resolvedIpStr, domain.getEnvironment(),
                             domain.getExposure(), domain.getOwner(), "/32");
                     openPorts.forEach(newIpAsset::addOpenPort);
+                    domain.setAssociatedIp(resolvedIpStr);
                     inventory.add(newIpAsset);
                 }
             } catch (UnknownHostException e) {
@@ -477,11 +477,6 @@ public class AttackSurfaceManager {
                         }
                         inventory.add(ip);
                     }
-                    case "CLOUD" -> {
-                        String provider = parts.length > 7 ? parts[7] : "AWS";
-                        String accountId = parts.length > 8 ? parts[8] : "ACC-DEFAULT";
-                        inventory.add(new CloudAsset(id, value, env, owner, provider, accountId));
-                    }
                 }
             }
             idSequence = maxId;
@@ -519,16 +514,6 @@ public class AttackSurfaceManager {
                     StringJoiner sj = new StringJoiner(",");
                     ip.getOpenPorts().forEach((p, banner) -> sj.add(p + ":" + banner));
                     sb.append(sj);
-                } else if (a instanceof CloudAsset c) {
-                    sb.append("CLOUD|")
-                            .append(c.getId()).append("|")
-                            .append(c.getValue()).append("|")
-                            .append(c.getEnvironment()).append("|")
-                            .append(c.getExposure()).append("|")
-                            .append(c.getOwner().getTeamName()).append("|")
-                            .append(c.getOwner().getEmail()).append("|")
-                            .append(c.getProvider()).append("|")
-                            .append(c.getAccountId());
                 }
                 writer.println(sb);
             }

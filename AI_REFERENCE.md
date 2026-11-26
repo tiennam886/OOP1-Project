@@ -35,7 +35,7 @@ AI (Gemini Notebook / NotebookLM) was utilized as an interactive engineering ass
 
 * **AI Action & Solution**:
   - Explained dual cybersecurity and OOP purpose of the method.
-  - Clarified how Sealed Classes (`Asset` permitting `DomainAsset`, `IpAsset`, `CloudAsset`) combined with Java Switch Pattern Matching and `when` guards perform context-aware triage.
+  - Clarified how Sealed Classes (`Asset` permitting `DomainAsset`, `IpAsset`) combined with Java Switch Pattern Matching and `when` guards perform context-aware triage.
 
 #### User Prompt 3
 > `The function is only to print out, not to do any actions, right?`
@@ -139,6 +139,7 @@ AI (Gemini Notebook / NotebookLM) was utilized as an interactive engineering ass
 |---|---|---|---|
 | 1 | Security Hardening | Command Injection Shield via `ProcessBuilder` & Regex | `AuditScanner.java` |
 | 2 | Pattern Matching | Switch dispatch engine with `when` guards | `RiskEngine.java` |
+| 3 | Reconnaissance | DNS resolution to `IpAsset` binding | `AsmApplication.java` |
 | 3 | Reconnaissance | DNS resolution to `IpAsset` binding | `AsmApplication.java` |
 | 4 | Resilience | Automatic HTTP 502 failover (`crt.sh` $\rightarrow$ `ctlogs.dev`) | `DiscoveryScanner.java` |
 | 5 | Vulnerability Audit | **CVE-2026-123007** NGINX HTTP/2 RCE Check | `AuditScanner.java` |

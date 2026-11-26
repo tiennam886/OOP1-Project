@@ -7,7 +7,7 @@ A robust, enterprise-grade Java 27 Command Line Interface (CLI) application desi
 ## 🌟 Key Capabilities & Features
 
 ### 1. Functional Features
-* **Asset Registration & Classification (F-001)**: Register and manage `DomainAsset`, `IpAsset`, and `CloudAsset` instances with environment tagging (`PROD`, `STAGING`, `DEV`) and exposure boundaries (`PUBLIC`, `INTERNAL`).
+* **Asset Registration & Classification (F-001)**: Register and manage `DomainAsset`, `IpAsset`, and instances with environment tagging (`PROD`, `STAGING`, `DEV`) and exposure boundaries (`PUBLIC`, `INTERNAL`).
 * **Aligned Inventory Table (F-002)**: Display assets in a clean, formatted CLI matrix with real-time risk scores and open port counters.
 * **Passive Reconnaissance & Auto-Failover (F-003)**: Enumerate subdomains via `crt.sh` Certificate Transparency logs with automatic failover to `ctlogs.dev` upon HTTP 502/downtime.
 * **Multi-Threaded Port Scanner & Option B Binding (F-003)**: Scan 16 critical TCP ports asynchronously (`ExecutorService`), grab service banners, resolve DNS to IP, and automatically instantiate/link `IpAsset` records in the inventory.
