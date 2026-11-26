@@ -4,6 +4,7 @@ import model.*;
 import scanner.AuditScanner;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Stream;
@@ -29,7 +30,7 @@ public class RiskEngine {
 
     public void inspectAssetWithPatternMatching(Asset asset, AuditScanner auditScanner, List<Asset> inventory) {
         if (asset == null || auditScanner == null) return;
-
+        Optional<IpAsset> matchingIpAsset = Optional.empty();
         System.out.println("\n[*] Executing contextual audit dispatch via Switch Pattern Matching:");
 
         switch (asset) {
@@ -40,24 +41,45 @@ public class RiskEngine {
 
                 auditDomainTarget(d, d.getValue(), auditScanner);
                 Set<String> targetSubdomains = new TreeSet<>(d.getSubdomains());
-
                 if (inventory != null) {
                     inventory.stream()
                             .filter(a -> a instanceof DomainAsset)
                             .map(Asset::getValue)
                             .filter(val -> val.endsWith("." + d.getValue()) && !val.equalsIgnoreCase(d.getValue()))
                             .forEach(targetSubdomains::add);
-                }
-
-                if (!targetSubdomains.isEmpty()) {
-                    System.out.printf("%n  [+] Auto-auditing %d related subdomains for %s:%n",
-                            targetSubdomains.size(), d.getValue());
-                    for (String sub : targetSubdomains) {
-                        System.out.println("     * Auditing subdomain target: " + sub);
-                        auditDomainTarget(d, sub, auditScanner);
+                    if (d.getAssociatedIp() != null) {
+                        matchingIpAsset = inventory.stream()
+                                .filter(a -> a instanceof IpAsset)
+                                .map(a -> (IpAsset) a)
+                                .filter(ip -> ip.getValue().equals(d.getAssociatedIp()))
+                                .findFirst();
                     }
-                } else {
-                    System.out.println("  [*] No child subdomains registered yet. (Tip: Run Option 3 'Discovery' first).");
+
+                    if (!targetSubdomains.isEmpty()) {
+                        System.out.printf("%n  [+] Auto-auditing %d related subdomains for %s:%n",
+                                targetSubdomains.size(), d.getValue());
+                        for (String sub : targetSubdomains) {
+                            System.out.println("     * Auditing subdomain target: " + sub);
+                            auditDomainTarget(d, sub, auditScanner);
+                        }
+                    } else {
+                        System.out.println("  [*] No child subdomains registered yet. (Tip: Run Option 3 'Discovery' first).");
+                    }
+
+                    if (matchingIpAsset.isPresent()) {
+                        IpAsset ipAsset = matchingIpAsset.get();
+                        System.out.printf("%n  [+] Discovered IP State [%s] (%d open ports):%n",
+                                d.getAssociatedIp(), ipAsset.getOpenPorts().size());
+
+                        ipAsset.getOpenPorts().forEach((port, banner) ->
+                                evaluatePort(port, banner).forEach(f ->
+                                        d.addFinding(f.severity(), f.category(),
+                                                String.format("[IP: %s] Port %d open (%s)", d.getAssociatedIp(), port, banner))
+                                )
+                        );
+                    } else {
+                        System.out.printf("  [*] No prior port discovery found for associated IP [%s]. (Tip: Run Option 3 Discovery first).%n", d.getAssociatedIp());
+                    }
                 }
             }
             case DomainAsset d -> {
@@ -72,7 +94,7 @@ public class RiskEngine {
                 );
             }
             case IpAsset ip -> {
-                System.out.println("  -> [IP HOST] Evaluating open service ports via Java 27 Primitive Patterns...");
+                System.out.println("  -> [IP HOST] Evaluating open service ports...");
                 ip.getOpenPorts().forEach((port, banner) ->
                         evaluatePort(port, banner).forEach(ip::addFinding)
                 );

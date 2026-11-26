@@ -8,10 +8,10 @@ import java.util.*;
 public abstract sealed class Asset extends NetworkEntity implements Auditable permits DomainAsset, IpAsset {
     private final String id;
     private final String value;
-    private Environment environment;
-    private Exposure exposure;
-    private OwnerContact owner; // Sử dụng Custom Immutable Type
-    private Instant lastScanned;
+    private final Environment environment;
+    private final Exposure exposure;
+    private final OwnerContact owner; // Sử dụng Custom Immutable Type
+    private final Instant lastScanned;
     private final List<RiskFinding> findings = new ArrayList<>();
 
     public Asset(String id, String value, Environment env, Exposure exp, OwnerContact owner, LocalDate regDate) {
@@ -31,15 +31,10 @@ public abstract sealed class Asset extends NetworkEntity implements Auditable pe
     public String getId() { return id; }
     public String getValue() { return value; }
     public Environment getEnvironment() { return environment; }
-    public void setEnvironment(Environment environment) { this.environment = environment; }
     public Exposure getExposure() { return exposure; }
-    public void setExposure(Exposure exposure) { this.exposure = exposure; }
 
     public OwnerContact getOwner() {
         return new OwnerContact(this.owner);
-    }
-    public void setOwner(OwnerContact owner) {
-        this.owner = new OwnerContact(owner);
     }
 
     public List<RiskFinding> getFindings() {
@@ -54,14 +49,21 @@ public abstract sealed class Asset extends NetworkEntity implements Auditable pe
         this.addFinding(new RiskFinding(severity, category, message));
     }
 
-    public Instant getLastScanned() { return lastScanned; }
-    public void setLastScanned(Instant lastScanned) { this.lastScanned = lastScanned; }
-
     public abstract String getAssetCategory();
 
     @Override
     public String toString() {
         return String.format("[%s] ID=%s, Value=%s, Env=%s, Exp=%s, Owner=%s, Risks=%d",
                 getAssetCategory(), this.id, super.getEntityName(), this.environment, this.exposure, this.owner, findings.size());
+    }
+
+    public void printAuditSummary() {
+        String scanTimeStr = (lastScanned != null) ? lastScanned.toString() : "Never Scanned";
+        System.out.println("===============================================================================");
+        System.out.printf("  [ASSET METADATA SUMMARY]%n");
+        System.out.printf("  ID:           %-15s | Category:     %s%n", getId(), getAssetCategory());
+        System.out.printf("  Target Value: %-15s | Environment:  %s%n", getValue(), getEnvironment());
+        System.out.printf("  Exposure:     %-15s | Last Scanned: %s%n", getExposure(), scanTimeStr);
+        System.out.println("===============================================================================");
     }
 }

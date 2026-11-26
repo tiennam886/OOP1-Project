@@ -282,6 +282,7 @@ public class AttackSurfaceManager {
                 var existingIpOpt = findExistingAsset(resolvedIpStr);
                 if (existingIpOpt.isPresent() && existingIpOpt.get() instanceof IpAsset existingIp) {
                     openPorts.forEach(existingIp::addOpenPort);
+                    domain.setAssociatedIp(resolvedIpStr);
                     System.out.printf("[+] Merged %d open ports into existing host [%s].%n",
                             openPorts.size(), existingIp.getId());
                 } else {
@@ -289,6 +290,7 @@ public class AttackSurfaceManager {
                     var newIpAsset = new IpAsset(newIpId, resolvedIpStr, domain.getEnvironment(),
                             domain.getExposure(), domain.getOwner(), "/32");
                     openPorts.forEach(newIpAsset::addOpenPort);
+                    domain.setAssociatedIp(resolvedIpStr);
                     inventory.add(newIpAsset);
                 }
             } catch (UnknownHostException e) {

@@ -7,6 +7,7 @@ import java.util.TreeSet;
 public final class DomainAsset extends Asset {
     private final Set<String> subdomains = new TreeSet<>();
     private final boolean isApex;
+    private String associatedIp;
 
     public DomainAsset(String id, String domainName, Environment env, Exposure exp, OwnerContact owner) {
         LocalDate now = LocalDate.now();
@@ -26,6 +27,14 @@ public final class DomainAsset extends Asset {
 
     public Set<String> getSubdomains() {
         return new TreeSet<>(subdomains); // Defensive copy
+    }
+
+    public void setAssociatedIp(String associatedIp) {
+        this.associatedIp = associatedIp;
+    }
+
+    public String getAssociatedIp() {
+        return associatedIp;
     }
 
     @Override
