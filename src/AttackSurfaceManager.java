@@ -13,8 +13,10 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class AttackSurfaceManager {
     private static final String DATA_FILE = "assets.txt";
@@ -60,14 +62,15 @@ public class AttackSurfaceManager {
                     1. Add a New Asset (Domain, IP, Cloud Account)
                     2. Show List of Assets\s
                     3. Filter Assets by Risk
-                    4. Run Discovery Asset
-                    5. Run Risk Evaluation
-                    6. Show Risk Dashboard
-                    7. Export Risk Report
-                    8. Remove an Asset
-                    9. Show Snapshots History
+                    4. Edit Asset's Metadata
+                    5. Run Discovery Asset
+                    6. Run Risk Evaluation
+                    7. Show Risk Dashboard
+                    8. Export Risk Report
+                    9. Remove an Asset
+                    10. Show Snapshots History
                     0. Exit
-                    Choose an option (0-9):\s""";
+                    Choose an option (0-10):\s""";
             System.out.print(menuBuilder);
 
             var choice = scanner.nextLine().trim();
@@ -81,12 +84,13 @@ public class AttackSurfaceManager {
                 case "1" -> addAsset();
                 case "2" -> listAssets();
                 case "3" -> filterAssets();
-                case "4" -> runDiscovery();
-                case "5" -> runRiskAudit();
-                case "6" -> showRiskDashboard();
-                case "7" -> exportReport();
-                case "8" -> deleteAsset();
-                case "9" -> displaySnapshots();
+                case "4" -> editAssetMetadata();
+                case "5" -> runDiscovery();
+                case "6" -> runRiskAudit();
+                case "7" -> showRiskDashboard();
+                case "8" -> exportReport();
+                case "9" -> deleteAsset();
+                case "10" -> displaySnapshots();
                 default -> IO.println("[-] Invalid Option");
             }
             if (!askToContinueOrExit()) {
@@ -125,8 +129,16 @@ public class AttackSurfaceManager {
             var exp = "2".equals(scanner.nextLine().trim()) ? Exposure.INTERNAL : Exposure.PUBLIC;
 
             System.out.print("Contact of Owner: ");
-            var team = scanner.nextLine().trim();
-            var owner = new OwnerContact(team, team.toLowerCase() + "@company.com");
+            System.out.print("Enter Owner Name/Team [Default: DevSecOps]: ");
+            var ownerName = scanner.nextLine().trim();
+            if (ownerName.isBlank()) ownerName = "DevSecOps";
+
+            System.out.print("Enter Owner Email [Default: " + ownerName.toLowerCase().replaceAll("\\s+", "") + "@company.com]: ");
+            var ownerEmail = scanner.nextLine().trim();
+            if (ownerEmail.isBlank()) {
+                ownerEmail = ownerName.toLowerCase().replaceAll("\\s+", "") + "@company.com";
+            }
+            var owner = new OwnerContact(ownerName, ownerEmail);
 
             var newId = "A-" + (++idSequence);
             Asset newAsset = switch (typeChoice) {
@@ -184,41 +196,142 @@ public class AttackSurfaceManager {
     }
 
     private static void filterAssets() {
-        System.out.print("Choose Filter (1: Only PROD, 2: Only PUBLIC, 3: Risk Score > 5): ");
-        var fChoice = scanner.nextLine().trim();
+        System.out.println("\n--- FILTER ASSETS INVENTORY ---");
+        System.out.println("1: Only PROD Environment");
+        System.out.println("2: Only PUBLIC Exposed");
+        System.out.println("3: Risk Score > 5");
+        System.out.println("4: By Apex Domain Cluster (Apex Domain + Associated IP + Subdomains)");
+        System.out.println("5: By Owner Contact (Name / Email / Department)");
+        System.out.print("Choose Filter Option (1-5): ");
 
+        var fChoice = scanner.nextLine().trim();
         final int minThreshold = 5;
 
         List<Asset> filtered = switch (fChoice) {
-            case "1" -> inventory.stream().filter(AssetFilters.byEnvironment(Environment.PROD)).toList();
-            case "2" -> inventory.stream().filter(AssetFilters.isPublicExposed()).toList();
-            case "3" -> inventory.stream().filter(AssetFilters.riskScoreAbove(minThreshold)).toList();
+            case "1" -> inventory.stream()
+                    .filter(AssetFilters.byEnvironment(Environment.PROD))
+                    .toList();
+
+            case "2" -> inventory.stream()
+                    .filter(AssetFilters.isPublicExposed())
+                    .toList();
+
+            case "3" -> inventory.stream()
+                    .filter(AssetFilters.riskScoreAbove(minThreshold))
+                    .toList();
+
+            case "4" -> {
+                System.out.print("Enter Target Apex Domain (e.g., corp-portal.com): ");
+                var apexInput = scanner.nextLine().trim();
+                yield AssetFilters.filterByApexDomainCluster(inventory, apexInput);
+            }
+
+            case "5" -> {
+                System.out.print("Enter Owner Name, Email, or Department to search: ");
+                var ownerQuery = scanner.nextLine().trim();
+                yield AssetFilters.filterByOwner(inventory, ownerQuery);
+            }
+
             default -> inventory;
         };
 
         if (filtered.isEmpty()) {
-            System.out.println("[-] Not Found suitable asset");
+            System.out.println("[-] Not Found suitable asset matching criteria.");
             return;
         }
 
-        System.out.printf("\n[+] FILTER RESULT (%d MATCHED ASSETS):%n", filtered.size());
-        System.out.printf("%-4s %-8s %-28s %-14s %-8s %-9s %-10s%n",
-                "NO", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "SCORE");
-        System.out.println("-".repeat(85));
+        System.out.printf("%n[+] FILTER RESULT (%d MATCHED ASSETS):%n", filtered.size());
+        System.out.printf("%-4s %-8s %-28s %-14s %-8s %-9s %-10s %-20s%n",
+                "NO", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "SCORE", "OWNER");
+        System.out.println("-".repeat(110));
 
         for (int i = 0; i < filtered.size(); i++) {
             Asset a = filtered.get(i);
-            System.out.printf("%-4d %-8s %-28s %-14s %-8s %-9s %-10d%n",
+            String ownerInfo = (a.getOwner() != null) ? a.getOwner().toString() : "N/A";
+
+            System.out.printf("%-4d %-8s %-28s %-14s %-8s %-9s %-10d %-20s%n",
                     (i + 1),
                     a.getId(),
                     a.getValue(),
                     a.getAssetCategory(),
                     a.getEnvironment(),
                     a.getExposure(),
-                    a.calculateRiskScore()
+                    a.calculateRiskScore(),
+                    ownerInfo
             );
         }
-        System.out.println("-".repeat(85));
+        System.out.println("-".repeat(110));
+    }
+
+    private void editAssetMetadata() {
+        listAssets();
+        System.out.print("Enter Target Asset ID to update metadata (e.g., A-101): ");
+        String assetId = scanner.nextLine().trim();
+
+        Asset target = inventory.stream()
+                .filter(a -> a.getId().equalsIgnoreCase(assetId))
+                .findFirst()
+                .orElse(null);
+
+        if (target == null) {
+            System.out.println("[-] Asset not found in inventory.");
+            return;
+        }
+
+        System.out.printf("%n[*] Editing Metadata for Asset [%s] (%s)%n", target.getId(), target.getValue());
+        System.out.println("  1. Update Environment (PRODUCTION, STAGING, DEVELOPMENT)");
+        System.out.println("  2. Update Exposure (PUBLIC, INTERNAL, VPC_ONLY)");
+        System.out.println("  3. Update Owner Contact (Name, Email, Department)");
+        System.out.print("Select field to update (1-3): ");
+
+        String choice = scanner.nextLine().trim();
+        switch (choice) {
+            case "1" -> {
+                System.out.print("Enter new Environment (PROD/STAGE/DEV): ");
+                String envInput = scanner.nextLine().trim().toUpperCase();
+                try {
+                    Environment newEnv = switch (envInput) {
+                        case "PROD", "PRODUCTION" -> Environment.PROD;
+                        case "STAGE", "STAGING" -> Environment.STAGING;
+                        case "DEV", "DEVELOPMENT" -> Environment.DEV;
+                        default -> Environment.UNKNOWN;
+                    };
+                    target.setEnvironment(newEnv);
+                    System.out.println("[+] Environment updated successfully to: " + newEnv);
+                } catch (Exception e) {
+                    System.out.println("[-] Invalid Environment selection.");
+                }
+            }
+            case "2" -> {
+                System.out.print("Enter new Exposure (PUBLIC/INTERNAL): ");
+                String expInput = scanner.nextLine().trim().toUpperCase();
+                try {
+                    Exposure newExp = switch (expInput) {
+                        case "PUBLIC" -> Exposure.PUBLIC;
+                        case "VPC", "VPC_ONLY" -> Exposure.VPC_ONLY;
+                        default -> Exposure.INTERNAL;
+                    };
+                    target.setExposure(newExp);
+                    System.out.println("[+] Exposure updated successfully to: " + newExp);
+                } catch (Exception e) {
+                    System.out.println("[-] Invalid Exposure selection.");
+                }
+            }
+            case "3" -> {
+                System.out.print("Enter Owner Name: ");
+                String name = scanner.nextLine().trim();
+                System.out.print("Enter Owner Email: ");
+                String email = scanner.nextLine().trim();
+
+                OwnerContact newOwner = new OwnerContact(
+                        name.isBlank() ? target.getOwner().getTeamName() : name,
+                        email.isBlank() ? target.getOwner().getEmail() : email
+                );
+                target.setOwner(newOwner);
+                System.out.println("[+] Owner Contact updated successfully!");
+            }
+            default -> System.out.println("[-] Invalid choice. Aborting edit.");
+        }
     }
 
     private void runDiscovery() {
@@ -249,6 +362,7 @@ public class AttackSurfaceManager {
                 int addedCount = 0;
                 for (String sub : subs) {
                     domainAsset.addSubdomain(sub);
+                    domainAsset.setLastScanned(Instant.now());
                     if (findExistingAsset(sub).isEmpty()) {
                         var newSubId = "A-" + (++idSequence);
                         inventory.add(new DomainAsset(newSubId, sub, domainAsset.getEnvironment(),
@@ -283,6 +397,7 @@ public class AttackSurfaceManager {
                 if (existingIpOpt.isPresent() && existingIpOpt.get() instanceof IpAsset existingIp) {
                     openPorts.forEach(existingIp::addOpenPort);
                     domain.setAssociatedIp(resolvedIpStr);
+                    domain.setLastScanned(Instant.now());
                     System.out.printf("[+] Merged %d open ports into existing host [%s].%n",
                             openPorts.size(), existingIp.getId());
                 } else {
@@ -291,6 +406,7 @@ public class AttackSurfaceManager {
                             domain.getExposure(), domain.getOwner(), "/32");
                     openPorts.forEach(newIpAsset::addOpenPort);
                     domain.setAssociatedIp(resolvedIpStr);
+                    domain.setLastScanned(Instant.now());
                     inventory.add(newIpAsset);
                 }
             } catch (UnknownHostException e) {
@@ -300,59 +416,250 @@ public class AttackSurfaceManager {
     }
 
     private void showRiskDashboard() {
-        List<RiskFinding> allFindings = inventory.stream()
+        System.out.println("\n==========================================================================================");
+        System.out.println("                         EXECUTIVE RISK DASHBOARD & CLUSTER METRICS                       ");
+        System.out.println("==========================================================================================");
+        System.out.println("1. View Full Infrastructure Dashboard");
+        System.out.println("2. Filter Dashboard by Apex Domain Cluster");
+        System.out.println("3. Filter Dashboard by Owner Contact");
+        System.out.print("Select view option (1-3): ");
+
+        String opt = scanner.nextLine().trim();
+        List<Asset> activeScope = inventory;
+
+        if ("2".equals(opt)) {
+            System.out.print("Enter Apex Domain (e.g., corp-portal.com): ");
+            String domain = scanner.nextLine().trim();
+            activeScope = AssetFilters.filterByApexDomainCluster(inventory, domain);
+        } else if ("3".equals(opt)) {
+            System.out.print("Enter Owner Name/Email query: ");
+            String q = scanner.nextLine().trim();
+            activeScope = AssetFilters.filterByOwner(inventory, q);
+        }
+
+        if (activeScope.isEmpty()) {
+            System.out.println("[!] No matching assets found for Dashboard rendering.");
+            return;
+        }
+
+        Map<Severity, Long> severityCounts = activeScope.stream()
                 .flatMap(a -> a.getFindings().stream())
+                .collect(Collectors.groupingBy(RiskFinding::severity, Collectors.counting()));
+
+        long criticals = severityCounts.getOrDefault(Severity.CRITICAL, 0L);
+        long highs     = severityCounts.getOrDefault(Severity.HIGH, 0L);
+        long mediums   = severityCounts.getOrDefault(Severity.MEDIUM, 0L);
+        long lows      = severityCounts.getOrDefault(Severity.LOW, 0L);
+        long infos     = severityCounts.getOrDefault(Severity.INFO, 0L);
+
+        System.out.printf("%n  [SCOPE METRICS] Assets in Scope: %d | Total Active Findings: %d%n",
+                activeScope.size(), activeScope.stream().mapToLong(a -> a.getFindings().size()).sum());
+        System.out.printf("  [SEVERITY BREAKDOWN] CRITICAL: %d | HIGH: %d | MEDIUM: %d | LOW: %d | INFO: %d%n",
+                criticals, highs, mediums, lows, infos);
+        System.out.println("------------------------------------------------------------------------------------------");
+
+        List<DomainAsset> apexDomains = activeScope.stream()
+                .filter(a -> a instanceof DomainAsset)
+                .map(a -> (DomainAsset) a)
+                .filter(d -> "APEX_DOMAIN".equalsIgnoreCase(d.getAssetCategory()))
                 .toList();
 
-        System.out.println("\n=======================================================");
-        System.out.println("           DEFENSIVE ASM - RISK DASHBOARD");
-        System.out.println("=======================================================");
-        System.out.printf("Monitored Digital Assets : %d%n", inventory.size());
-        System.out.printf("Total Risk Findings      : %d%n", allFindings.size());
-        System.out.println("-".repeat(55));
-
-        for (Severity sev : Severity.values()) {
-            long count = allFindings.stream().filter(f -> f.severity() == sev).count();
-            System.out.printf("%-10s : %d findings%n", sev, count);
+        if (apexDomains.isEmpty()) {
+            System.out.println("[*] No Apex Domains found in the selected scope.");
+            return;
         }
-        System.out.println("-".repeat(55));
 
-        System.out.println("\n[!] CRITICAL & HIGH SEVERITY PRIORITIES:");
-        allFindings.stream()
-                .filter(f -> f.severity() == Severity.CRITICAL || f.severity() == Severity.HIGH)
-                .limit(10)
-                .forEach(f -> System.out.printf(" - [%-8s] [%-12s] %s%n", f.severity(), f.category(), f.message()));
-    }
+        for (DomainAsset apex : apexDomains) {
+            String scanTimeStr = (apex.getLastScanned() != null) ? apex.getLastScanned().toString() : "Never Scanned";
+            String ownerStr = (apex.getOwner() != null) ? apex.getOwner().toString() + ")" : "Unassigned";
 
-    private void exportReport() {
-        String reportFile = "asm_report.txt";
-        try (PrintWriter writer = new PrintWriter(new FileWriter(reportFile))) {
-            writer.println("===============================================================================");
-            writer.println("           DEFENSIVE ATTACK SURFACE MANAGEMENT (ASM) - AUDIT REPORT");
-            writer.println("           Generated At: " + java.time.Instant.now());
-            writer.println("===============================================================================\n");
+            System.out.printf("%n APEX DOMAIN CLUSTER: [%s] (ID: %s | Env: %s | Owner: %s)%n",
+                    apex.getValue(), apex.getId(), apex.getEnvironment(), ownerStr);
+            System.out.printf("   Last Audit Timestamp: %s%n", scanTimeStr);
 
-            writer.println("1. ASSET INVENTORY SUMMARY:");
-            writer.printf("%-6s %-26s %-14s %-8s %-9s %-10s%n", "ID", "VALUE", "TYPE", "ENV", "EXPOSURE", "RISK SCORE");
-            writer.println("-".repeat(78));
-            for (Asset a : inventory) {
-                writer.printf("%-6s %-26s %-14s %-8s %-9s %-10d%n",
-                        a.getId(), a.getValue(), a.getAssetCategory(), a.getEnvironment(), a.getExposure(), a.calculateRiskScore());
+            String assocIp = apex.getAssociatedIp();
+            IpAsset matchingIpAsset = null;
+
+            if (assocIp != null && !assocIp.isBlank()) {
+                System.out.printf("   ├── Associated IP: %s%n", assocIp);
+
+                matchingIpAsset = inventory.stream()
+                        .filter(a -> a instanceof IpAsset)
+                        .map(a -> (IpAsset) a)
+                        .filter(ip -> ip.getValue().equalsIgnoreCase(assocIp))
+                        .findFirst()
+                        .orElse(null);
+
+                if (matchingIpAsset != null && !matchingIpAsset.getOpenPorts().isEmpty()) {
+                    System.out.printf("   │    └── Open Service Ports: %s%n", matchingIpAsset.getOpenPorts());
+                }
+            } else {
+                System.out.println("   ├── Associated IP: Unresolved (Tip: Run Option 3 Discovery first)");
             }
 
-            writer.println("\n2. COMPREHENSIVE SECURITY FINDINGS:");
-            writer.println("-".repeat(78));
-            for (Asset a : inventory) {
-                if (!a.getFindings().isEmpty()) {
-                    writer.printf("\n[*] Asset: %s (%s) - Owner: %s%n", a.getValue(), a.getId(), a.getOwner().getTeamName());
-                    for (RiskFinding f : a.getFindings()) {
-                        writer.printf("    - [%-8s] [%-12s] %s%n", f.severity(), f.category(), f.message());
+            Set<String> subdomains = apex.getSubdomains();
+            System.out.printf("   └── Related Subdomains (%d total): %s%n",
+                    subdomains.size(), subdomains.isEmpty() ? "None" : String.join(", ", subdomains));
+
+            List<RiskFinding> clusterFindings = new ArrayList<>(apex.getFindings());
+            if (matchingIpAsset != null) {
+                for (RiskFinding ipFinding : matchingIpAsset.getFindings()) {
+                    if (!clusterFindings.contains(ipFinding)) {
+                        clusterFindings.add(ipFinding);
                     }
                 }
             }
-            System.out.println("[+] Audit report exported successfully to: " + reportFile);
+
+            System.out.println("\n   --- Cluster Risk Findings ---");
+            if (clusterFindings.isEmpty()) {
+                System.out.println("   [+] Clean posture. No active vulnerabilities detected.");
+            } else {
+                clusterFindings.forEach(f -> System.out.printf("   -> [%-8s] (%-14s) %s%n",
+                        f.severity(), f.category(), f.message()));
+            }
+            System.out.println("------------------------------------------------------------------------------------------");
+        }
+    }
+
+    private void exportReport() {
+        System.out.println("\n--- EXPORT RISK REPORT ---");
+        System.out.println("1. Export Full System Audit Report");
+        System.out.println("2. Export Report filtered by Apex Domain Cluster");
+        System.out.println("3. Export Report filtered by Owner Contact");
+        System.out.print("Select export mode (1-3): ");
+
+        String choice = scanner.nextLine().trim();
+        List<Asset> exportScope = inventory;
+        String filterLabel = "ALL_ASSETS";
+
+        if ("2".equals(choice)) {
+            System.out.print("Enter Apex Domain (e.g., corp-portal.com): ");
+            String domain = scanner.nextLine().trim();
+            exportScope = AssetFilters.filterByApexDomainCluster(inventory, domain);
+            filterLabel = "APEX_CLUSTER_" + domain;
+        } else if ("3".equals(choice)) {
+            System.out.print("Enter Owner query: ");
+            String q = scanner.nextLine().trim();
+            exportScope = AssetFilters.filterByOwner(inventory, q);
+            filterLabel = "OWNER_" + q;
+        }
+
+        if (exportScope.isEmpty()) {
+            System.out.println("[!] No matching assets found in the selected scope to export.");
+            return;
+        }
+
+        String filename = "ASM_REPORT_" + filterLabel.replaceAll("[^a-zA-Z0-9_]", "_") + ".txt";
+
+        try (PrintWriter out = new PrintWriter(new FileWriter(filename))) {
+            out.println("===============================================================================");
+            out.println("               DEFENSIVE ATTACK SURFACE MANAGEMENT (ASM) REPORT                ");
+            out.println("===============================================================================");
+            out.println("Generated At   : " + Instant.now());
+            out.println("Filter Scope   : " + filterLabel);
+            out.println("Scope Assets   : " + exportScope.size());
+            out.println("===============================================================================\n");
+
+            // SECTION 1: DOMAIN INFRASTRUCTURE & APEX CLUSTERS
+            out.println("1. DOMAIN INFRASTRUCTURE & APEX CLUSTERS");
+            out.println("-------------------------------------------------------------------------------");
+
+            List<DomainAsset> apexDomains = exportScope.stream()
+                    .filter(a -> a instanceof DomainAsset)
+                    .map(a -> (DomainAsset) a)
+                    .filter(d -> "APEX_DOMAIN".equalsIgnoreCase(d.getAssetCategory()))
+                    .toList();
+
+            if (apexDomains.isEmpty()) {
+                out.println("No Apex Domains found in this export scope.");
+            } else {
+                for (DomainAsset apex : apexDomains) {
+                    String ownerStr = (apex.getOwner() != null)
+                            ? apex.getOwner().toString() + ")"
+                            : "Unassigned";
+
+                    out.printf("APEX DOMAIN  : %s [ID: %s]%n", apex.getValue(), apex.getId());
+                    out.printf("  Environment  : %s | Exposure: %s | Owner: %s%n",
+                            apex.getEnvironment(), apex.getExposure(), ownerStr);
+                    out.printf("  Last Scanned : %s%n", apex.getLastScanned() != null ? apex.getLastScanned() : "Never");
+
+                    String assocIp = apex.getAssociatedIp();
+                    IpAsset matchingIpAsset = null;
+
+                    if (assocIp != null && !assocIp.isBlank()) {
+                        out.printf("  Associated IP: %s%n", assocIp);
+
+                        matchingIpAsset = inventory.stream()
+                                .filter(a -> a instanceof IpAsset)
+                                .map(a -> (IpAsset) a)
+                                .filter(ip -> ip.getValue().equalsIgnoreCase(assocIp))
+                                .findFirst()
+                                .orElse(null);
+
+                        if (matchingIpAsset != null && !matchingIpAsset.getOpenPorts().isEmpty()) {
+                            out.printf("    └── Open Service Ports: %s%n", matchingIpAsset.getOpenPorts());
+                        }
+                    } else {
+                        out.println("  Associated IP: Unresolved (Tip: Run Option 3 Discovery first)");
+                    }
+
+                    out.printf("  Subdomains (%d): %s%n", apex.getSubdomains().size(),
+                            apex.getSubdomains().isEmpty() ? "None" : String.join(", ", apex.getSubdomains()));
+
+                    List<RiskFinding> clusterFindings = new ArrayList<>(apex.getFindings());
+                    if (matchingIpAsset != null) {
+                        for (RiskFinding ipFinding : matchingIpAsset.getFindings()) {
+                            if (!clusterFindings.contains(ipFinding)) {
+                                clusterFindings.add(ipFinding);
+                            }
+                        }
+                    }
+
+                    if (!clusterFindings.isEmpty()) {
+                        out.println("  Cluster Vulnerability Findings:");
+                        clusterFindings.forEach(f ->
+                                out.printf("    - [%-8s] (%-14s) %s%n", f.severity(), f.category(), f.message()));
+                    } else {
+                        out.println("  Cluster Vulnerability Findings: None detected.");
+                    }
+                    out.println("-------------------------------------------------------------------------------");
+                }
+            }
+
+            out.println("\n2. STANDALONE IP INFRASTRUCTURE & OPEN PORTS AUDIT");
+            out.println("-------------------------------------------------------------------------------");
+            List<IpAsset> ipAssets = exportScope.stream()
+                    .filter(a -> a instanceof IpAsset)
+                    .map(a -> (IpAsset) a)
+                    .toList();
+
+            if (ipAssets.isEmpty()) {
+                out.println("No standalone IP assets in this export scope.");
+            } else {
+                for (IpAsset ip : ipAssets) {
+                    out.printf("IP HOST: %s [ID: %s] | Open Ports: %d%n",
+                            ip.getValue(), ip.getId(), ip.getOpenPorts().size());
+                    if (!ip.getOpenPorts().isEmpty()) {
+                        ip.getOpenPorts().forEach((port, banner) ->
+                                out.printf("  - Port %-5d : %s%n", port, banner));
+                    }
+                    if (!ip.getFindings().isEmpty()) {
+                        out.println("  Vulnerabilities:");
+                        ip.getFindings().forEach(f ->
+                                out.printf("    - [%-8s] (%-14s) %s%n", f.severity(), f.category(), f.message()));
+                    }
+                    out.println("-------------------------------------------------------------------------------");
+                }
+            }
+
+            out.println("\n===============================================================================");
+            out.println("                               END OF REPORT                                   ");
+            out.println("===============================================================================");
+
+            System.out.println("[+] Audit report exported successfully to file: " + filename);
+
         } catch (Exception e) {
-            System.out.println("[-] Export failed: " + e.getMessage());
+            System.out.println("[-] Error exporting report: " + e.getMessage());
         }
     }
 

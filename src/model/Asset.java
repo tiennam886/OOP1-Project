@@ -8,10 +8,10 @@ import java.util.*;
 public abstract sealed class Asset extends NetworkEntity implements Auditable permits DomainAsset, IpAsset {
     private final String id;
     private final String value;
-    private final Environment environment;
-    private final Exposure exposure;
-    private final OwnerContact owner; // Sử dụng Custom Immutable Type
-    private final Instant lastScanned;
+    private Environment environment;
+    private Exposure exposure;
+    private OwnerContact owner; // Sử dụng Custom Immutable Type
+    private Instant lastScanned;
     private final List<RiskFinding> findings = new ArrayList<>();
 
     public Asset(String id, String value, Environment env, Exposure exp, OwnerContact owner, LocalDate regDate) {
@@ -20,7 +20,10 @@ public abstract sealed class Asset extends NetworkEntity implements Auditable pe
         this.value = value;
         this.environment = env;
         this.exposure = exp;
-        this.owner = new OwnerContact(owner);
+        this.owner = (owner != null)
+                ? new OwnerContact(owner.getTeamName(), owner.getEmail())
+                : new OwnerContact("DevSecOps", "devsec@company.com");
+
         this.lastScanned = Instant.now();
     }
 
@@ -66,4 +69,25 @@ public abstract sealed class Asset extends NetworkEntity implements Auditable pe
         System.out.printf("  Exposure:     %-15s | Last Scanned: %s%n", getExposure(), scanTimeStr);
         System.out.println("===============================================================================");
     }
+
+    public void setEnvironment(Environment env) {
+        this.environment = env;
+    }
+
+    public void setExposure(Exposure newExp) {
+        this.exposure = newExp;
+    }
+
+    public void setOwner(OwnerContact newOwner) {
+        this.owner = newOwner;
+    }
+
+    public Instant getLastScanned() {
+        return lastScanned;
+    }
+
+    public void setLastScanned(Instant lastScanned) {
+        this.lastScanned = lastScanned;
+    }
+
 }

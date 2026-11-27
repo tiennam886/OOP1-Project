@@ -3,6 +3,7 @@ package engine;
 import model.*;
 import scanner.AuditScanner;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -103,6 +104,7 @@ public class RiskEngine {
             default -> System.out.println("  -> Unrecognized asset category.");
         }
 
+        asset.setLastScanned(Instant.now());
         System.out.printf("[+] Contextual audit complete. Total findings registered for %s: %d%n",
                 asset.getValue(), asset.getFindings().size());
     }
