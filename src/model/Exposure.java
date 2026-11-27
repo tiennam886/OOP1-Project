@@ -1,5 +1,5 @@
 package model;
 
 public enum Exposure {
-    PUBLIC, INTERNAL
+    PUBLIC, VPC_ONLY, INTERNAL
 }

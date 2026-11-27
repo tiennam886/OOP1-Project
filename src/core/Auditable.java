@@ -12,8 +12,6 @@ public interface Auditable {
     }
 
     private String formatAuditOutput(int score) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("[AUDIT RESULT] Compliance: ").append(complianceStandard()).append(" | Computed Risk Score: ").append(score);
-        return sb.toString();
+        return "[AUDIT RESULT] Compliance: " + complianceStandard() + " | Computed Risk Score: " + score;
     }
 }
