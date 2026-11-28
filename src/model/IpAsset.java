@@ -18,7 +18,7 @@ public final class IpAsset extends Asset {
     }
 
     public Map<Integer, String> getOpenPorts() {
-        return new TreeMap<>(this.openPorts); // Defensive copy
+        return new TreeMap<>(this.openPorts);
     }
 
     public String getIpRange() { return ipRange; }
@@ -30,9 +30,8 @@ public final class IpAsset extends Asset {
 
     @Override
     public int calculateRiskScore() {
-        // Polymorphism
         int score = getFindings().stream().mapToInt(f -> f.severity().getWeight()).sum();
-        score += openPorts.size() * 2; // Mỗi port mở tăng thêm điểm rủi ro
+        score += openPorts.size() * 2;
         return score;
     }
 }

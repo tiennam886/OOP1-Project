@@ -9,7 +9,6 @@ public final class OwnerContact {
         this.email = (email == null || email.isBlank()) ? "soc@internal.local" : email.trim();
     }
 
-    // Defensive copy constructor
     public OwnerContact(OwnerContact other) {
         this(other != null ? other.teamName : null, other != null ? other.email : null);
     }

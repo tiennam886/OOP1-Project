@@ -34,11 +34,10 @@ public class AttackSurfaceManager {
     }
 
     private void seedSampleData() {
-        // Initialize Sample Data
         var owner = new OwnerContact("RedTeam-Ops", "red@company.com");
         var d1 = new DomainAsset("A-" + (++idSequence), "corp-portal.com", Environment.PROD, Exposure.PUBLIC, owner);
-        d1.addSubdomain("[suspicious link removed]");
-        d1.addSubdomain("[suspicious link removed]");
+        d1.addSubdomain("prod");
+        d1.addSubdomain("dev");
         d1.addFinding(Severity.HIGH, "TLS", "TLS Certification will be expired within 7 days");
 
         var ip1 = new IpAsset("A-" + (++idSequence), "198.51.100.25", Environment.DEV, Exposure.PUBLIC, owner, "/32");
@@ -559,8 +558,6 @@ public class AttackSurfaceManager {
             out.println("Filter Scope   : " + filterLabel);
             out.println("Scope Assets   : " + exportScope.size());
             out.println("===============================================================================\n");
-
-            // SECTION 1: DOMAIN INFRASTRUCTURE & APEX CLUSTERS
             out.println("1. DOMAIN INFRASTRUCTURE & APEX CLUSTERS");
             out.println("-------------------------------------------------------------------------------");
 
@@ -816,8 +813,6 @@ public class AttackSurfaceManager {
                             .append(ip.getOwner().getTeamName()).append("|")
                             .append(ip.getOwner().getEmail()).append("|")
                             .append(ip.getIpRange()).append("|");
-
-                    // Serialize map openPorts: 3306:MySQL,22:SSH
                     StringJoiner sj = new StringJoiner(",");
                     ip.getOpenPorts().forEach((p, banner) -> sj.add(p + ":" + banner));
                     sb.append(sj);

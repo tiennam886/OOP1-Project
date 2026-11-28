@@ -10,7 +10,7 @@ public abstract sealed class Asset extends NetworkEntity implements Auditable pe
     private final String value;
     private Environment environment;
     private Exposure exposure;
-    private OwnerContact owner; // Sử dụng Custom Immutable Type
+    private OwnerContact owner;
     private Instant lastScanned;
     private final List<RiskFinding> findings = new ArrayList<>();
 
@@ -41,7 +41,7 @@ public abstract sealed class Asset extends NetworkEntity implements Auditable pe
     }
 
     public List<RiskFinding> getFindings() {
-        return Collections.unmodifiableList(findings); // Trả về unmodifiable view
+        return Collections.unmodifiableList(findings);
     }
 
     public void addFinding(RiskFinding finding) {
